@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -8,6 +8,7 @@ use crate::error::{Error, Loaded, Located};
 use crate::fallback::{FallbackGeneralizations, FallbackRule};
 use crate::lower::rejects_row;
 use crate::model::Model;
+use crate::store::NameIndex;
 use crate::wire::{EntryWire, Fields};
 
 const SAMPLE_SPEC: &str = "sample_spec";
@@ -60,7 +61,7 @@ pub struct Catalog {
     entries: IndexMap<String, ModelEntry>,
     sections: Vec<Section>,
     aliases: IndexMap<String, String>,
-    lowercase_keys: HashMap<String, String>,
+    names: NameIndex,
     fallback_generalizations: Option<FallbackGeneralizations>,
 }
 
@@ -157,17 +158,13 @@ impl Catalog {
                     })
                     .ok()
             });
-        let lowercase_keys = entries
-            .keys()
-            .chain(aliases.keys())
-            .map(|key| (key.to_lowercase(), key.clone()))
-            .collect();
+        let names = name_index(&entries, &aliases);
         Ok(Loaded {
             value: Self {
                 entries,
                 sections,
                 aliases,
-                lowercase_keys,
+                names,
                 fallback_generalizations,
             },
             errors: problems,
@@ -271,12 +268,7 @@ impl Catalog {
                 .count();
             section.index -= removed_before;
         }
-        catalog.lowercase_keys = catalog
-            .entries
-            .keys()
-            .chain(catalog.aliases.keys())
-            .map(|key| (key.to_lowercase(), key.clone()))
-            .collect();
+        catalog.names = name_index(&catalog.entries, &catalog.aliases);
         (catalog, removed_errors)
     }
 
@@ -294,7 +286,7 @@ impl Catalog {
         let matched_key = if self.entries.contains_key(key) || self.aliases.contains_key(key) {
             key
         } else {
-            self.lowercase_keys.get(&key.to_lowercase())?.as_str()
+            self.names.key_for(key)?
         };
         let canonical_key = self
             .aliases
@@ -353,6 +345,23 @@ fn read_row(fields: &Fields) -> (Option<Model>, Option<Vec<String>>, Vec<Located
             (None, aliases, errors)
         }
     }
+}
+
+fn name_index(
+    entries: &IndexMap<String, ModelEntry>,
+    aliases: &IndexMap<String, String>,
+) -> NameIndex {
+    let provider = |key: &str| entries.get(key)?.field("litellm_provider")?.as_str();
+    NameIndex::new(
+        entries
+            .keys()
+            .map(|key| (key.as_str(), provider(key)))
+            .chain(
+                aliases
+                    .iter()
+                    .map(|(alias, owner)| (alias.as_str(), provider(owner))),
+            ),
+    )
 }
 
 fn is_section(key: &str) -> bool {

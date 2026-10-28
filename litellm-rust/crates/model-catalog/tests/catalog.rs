@@ -213,8 +213,13 @@ fn rejected_rows_and_their_aliases_are_removed_without_disturbing_written_order(
         catalog.lookup("before-alias").unwrap().canonical_key,
         "before"
     );
+    assert_eq!(
+        catalog.lookup("BEFORE-ALIAS").unwrap().matched_key,
+        "before-alias"
+    );
     assert!(catalog.lookup("bad").is_none());
-    assert!(catalog.lookup("bad-alias").is_none());
+    assert!(catalog.lookup("BAD").is_none());
+    assert!(catalog.lookup("Bad-Alias").is_none());
     assert_eq!(catalog.model_count(), 2);
     assert_eq!(
         written(&catalog),

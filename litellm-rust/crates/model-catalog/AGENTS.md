@@ -8,6 +8,8 @@
 
 `Billing` on `Prices` holds the row attributes pricing reads (text unit, band edge, cache-read fallback, wall clock, web search unit, tier scope). `lower.rs` derives it from the row and its `litellm_provider`, so `litellm-cost` holds no provider list
 
+`store.rs` is the catalog's in-memory store, built for three queries: a row by exact key, the actual key for a case-insensitive name, and the keys a raw `litellm_provider` names. `CatalogView` is the read interface every lookup goes through, and `NameIndex` is the store's only secondary index. Never keep another lowercase map or provider grouping in another module. Add the query to `NameIndex` instead. The index holds keys, never rows, so a value write never makes it stale and only adding or removing keys does
+
 `layers.rs`, `resolve.rs`, `model_info.rs` and `register.rs` hold types only. The functions over them land with their first caller
 
 Catalog errors use one `Error` enum with a `Located` JSON Pointer. Only `lower.rs` decides which errors are fatal and which reject a row

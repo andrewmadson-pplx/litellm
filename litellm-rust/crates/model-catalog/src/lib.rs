@@ -14,6 +14,7 @@ mod model;
 mod model_info;
 mod register;
 mod resolve;
+mod store;
 mod vocabulary;
 pub mod wire;
 
@@ -27,6 +28,7 @@ pub use model::*;
 pub use model_info::*;
 pub use register::*;
 pub use resolve::*;
+pub use store::*;
 pub use vocabulary::*;
 
 #[cfg(feature = "schema")]

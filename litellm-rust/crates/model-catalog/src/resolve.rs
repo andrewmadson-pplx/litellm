@@ -1,21 +1,6 @@
 mod image;
 
-use std::borrow::Cow;
-
 pub use image::*;
-
-use crate::wire::Fields;
-
-/// The live map as `resolve` sees it. The Python host implements it over the bound dict, tests over a `BTreeMap`
-pub trait CatalogView {
-    fn contains(&self, key: &str) -> bool;
-    fn row(&self, key: &str) -> Option<RowRef<'_>>;
-    /// The actual key for a case-insensitive name, from the one name index
-    fn by_normalized(&self, name: &str) -> Option<String>;
-}
-
-/// A row handed back by `CatalogView`, decoded into the typed fields
-pub type RowRef<'a> = Cow<'a, Fields>;
 
 /// The seven names main's `get_model_info` tries, built by Python, walked in this order by Rust
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
