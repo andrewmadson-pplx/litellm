@@ -58,6 +58,17 @@ pub enum Error {
     InvalidDate,
 }
 
+/// What a cost map change has to fix before it merges
+#[derive(Debug, Error)]
+pub enum Problem {
+    #[error(transparent)]
+    Invalid(Located),
+    #[error("{model}.{key} is not a field litellm reads")]
+    Unrecognized { model: String, key: String },
+    #[error("fallback_generalizations has no rules")]
+    NoFallbackRules,
+}
+
 #[derive(Debug)]
 pub struct Located {
     pub path: String,

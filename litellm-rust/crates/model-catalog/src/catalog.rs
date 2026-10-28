@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::error::{Error, Loaded, Located};
+use crate::error::{Error, Loaded, Located, Problem};
 use crate::fallback::{FallbackGeneralizations, FallbackRule};
 use crate::lower::rejects_row;
 use crate::model::Model;
@@ -212,6 +212,32 @@ impl Catalog {
             },
             errors: problems,
         })
+    }
+
+    pub fn problems(body: &[u8]) -> Vec<Problem> {
+        let Loaded {
+            value: catalog,
+            errors,
+        } = match Self::parse(body) {
+            Ok(loaded) => loaded,
+            Err(fatal) => return vec![Problem::Invalid(fatal)],
+        };
+        let unrecognized = catalog
+            .unrecognized()
+            .map(|(model, key)| Problem::Unrecognized {
+                model: model.to_owned(),
+                key: key.to_owned(),
+            });
+        let no_fallback_rules = catalog
+            .fallback_rules()
+            .is_none_or(<[_]>::is_empty)
+            .then_some(Problem::NoFallbackRules);
+        errors
+            .into_iter()
+            .map(Problem::Invalid)
+            .chain(unrecognized)
+            .chain(no_fallback_rules)
+            .collect()
     }
 
     pub fn row_errors(model: &str, fields: &Fields) -> Vec<Located> {

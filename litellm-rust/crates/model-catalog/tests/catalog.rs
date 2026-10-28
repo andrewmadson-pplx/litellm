@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use litellm_model_catalog::{
-    BUNDLED_REGISTRY, Catalog, Error, IntegrityLimits, Located, Mode, Written, fatal,
+    BUNDLED_REGISTRY, Catalog, Error, IntegrityLimits, Located, Mode, Problem, Written, fatal,
 };
 use rstest::{fixture, rstest};
 use serde_json::{Map, Value, json};
@@ -379,19 +379,39 @@ fn written_is_the_document_in_order_including_sections_and_bad_entries() {
 }
 
 #[rstest]
-fn the_bundled_registry_parses_with_no_problems_and_every_key_understood() {
-    let loaded = Catalog::parse(BUNDLED_REGISTRY).unwrap();
-    let catalog = loaded.value;
-    assert!(loaded.errors.is_empty(), "{:#?}", loaded.errors);
-    let unrecognized: Vec<_> = catalog.unrecognized().collect();
-    assert!(unrecognized.is_empty(), "{unrecognized:#?}");
-    assert!(
-        catalog
-            .fallback_rules()
-            .is_some_and(|rules| !rules.is_empty())
-    );
+fn the_bundled_registry_has_no_problems() {
+    let problems = Catalog::problems(BUNDLED_REGISTRY);
+    assert!(problems.is_empty(), "{problems:#?}");
     const REFERENCE_MODEL_COUNT: usize = 4303;
+    let catalog = Catalog::parse(BUNDLED_REGISTRY).unwrap().value;
     assert!(catalog.model_count() as f64 >= REFERENCE_MODEL_COUNT as f64 * 0.9);
+}
+
+const RULES: &str = r#""fallback_generalizations":{"rules":[{"name":"family","pattern":"^new-","model_info":{"mode":"chat"}}]}"#;
+
+fn kinds(body: &str) -> Vec<&'static str> {
+    Catalog::problems(body.as_bytes())
+        .iter()
+        .map(|problem| match problem {
+            Problem::Invalid(_) => "invalid",
+            Problem::Unrecognized { .. } => "unrecognized",
+            Problem::NoFallbackRules => "no_fallback_rules",
+        })
+        .collect()
+}
+
+#[rstest]
+#[case::clean(format!(r#"{{{RULES},"m":{{"litellm_provider":"test"}}}}"#), vec![])]
+#[case::not_json("{".to_owned(), vec!["invalid"])]
+#[case::row_error(format!(r#"{{{RULES},"m":{{}}}}"#), vec!["invalid"])]
+#[case::unread_key(format!(r#"{{{RULES},"m":{{"litellm_provider":"test","typo_cost":1}}}}"#), vec!["unrecognized"])]
+#[case::no_rules(r#"{"m":{"litellm_provider":"test"}}"#.to_owned(), vec!["no_fallback_rules"])]
+#[case::empty_rules(r#"{"fallback_generalizations":{"rules":[]},"m":{"litellm_provider":"test"}}"#.to_owned(), vec!["no_fallback_rules"])]
+fn problems_list_what_a_cost_map_change_must_fix(
+    #[case] body: String,
+    #[case] expected: Vec<&str>,
+) {
+    assert_eq!(kinds(&body), expected);
 }
 
 #[rstest]
