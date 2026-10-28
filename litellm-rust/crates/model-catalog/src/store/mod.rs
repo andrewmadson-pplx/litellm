@@ -194,7 +194,6 @@ mod tests {
             self.identity.set(self.identity.get() + 1);
             self.index_changes.set(self.index_changes.get() + 1);
         }
-
     }
 
     /// A row is its `litellm_provider`, which is also the group the store lists its key under
