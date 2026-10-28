@@ -230,7 +230,7 @@ def _message_texts(message: OpenAIDecisionInputMessage) -> tuple[str, ...]:
     return tuple(part.text for part in message.content if isinstance(part, OpenAIDecisionInputText))
 
 
-def _systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
+def systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
     match decision_input:
         case DecisionsIRState():
             return decision_input.state
@@ -299,7 +299,7 @@ def _systemone_question(question: DecisionsIRQuestion) -> Mapping[str, object]:
 
 
 def ir_to_systemone_request(model: str, request: DecisionsIRRequest) -> Mapping[str, object]:
-    state: Final = _systemone_state(request.input)
+    state: Final = systemone_state(request.input)
     keyed_questions: Final = zip(systemone_keys(request.questions), request.questions, strict=True)
     images: Final = input_images(request.input)
     return {
