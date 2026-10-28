@@ -229,7 +229,7 @@ def _message_texts(message: OpenAIDecisionInputMessage) -> tuple[str, ...]:
     return tuple(part.text for part in message.content if isinstance(part, OpenAIDecisionInputText))
 
 
-def _systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
+def systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
     match decision_input:
         case DecisionsIRState():
             return decision_input.state
@@ -304,7 +304,7 @@ def ir_to_systemone_request(
         return UnsupportedDecisionsRequest(reason="audio input is not supported by this Decisions model")
     if request.videos and not supports_video:
         return UnsupportedDecisionsRequest(reason="video input is not supported by this Decisions model")
-    state: Final = _systemone_state(request.input)
+    state: Final = systemone_state(request.input)
     keyed_questions: Final = zip(systemone_keys(request.questions), request.questions, strict=True)
     images: Final = input_images(request.input)
     return {

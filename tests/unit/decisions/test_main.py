@@ -1913,6 +1913,7 @@ async def test_non_string_safety_identifier_is_dropped_from_the_wire_under_drop_
 
 _CLOUDFLARE_RUN_URL: Final = "https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/cloudflare"
 _PERPLEXITY_DECISIONS_URL: Final = "https://api.perplexity.ai/v1/decisions"
+_NACE_SYSTEMONE_URL: Final = "https://console.nace.ai/v1/systemone"
 _PNG_DATA_URL: Final = "data:image/png;base64,AA=="
 _REMOTE_IMAGE_URL: Final = "https://images.example/screen.png"
 _SCREEN_TEXT: Final = "Is the screen cracked?"
@@ -2104,6 +2105,160 @@ async def test_remote_input_images_reach_openai_unfetched(
     assert async_only_image_fetch.fetched == []
 
 
+_PERPLEXITY_IMAGE_PART: Final[Mapping[str, object]] = MappingProxyType(
+    {"type": "image_url", "image_url": {"url": _PNG_DATA_URL}}
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ("pplx-decider-v1.2", "pplx-decider-flash-v1.2"))
+async def test_input_images_reach_perplexity_as_image_url_parts_inside_state(
+    model: str, respx_mock: respx.MockRouter
+) -> None:
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    response: Final = await litellm.adecisions(
+        model=f"perplexity/{model}",
+        api_key="caller-key",
+        input=(
+            *_screen_messages(_PNG_DATA_URL),
+            {"role": "user", "content": [{"type": "input_image", "image_url": "data:image/webp;base64,BB=="}]},
+            {"role": "user", "content": "Order 1234."},
+        ),
+        questions=_PREDICATE_QUESTIONS,
+    )
+
+    assert json.loads(route.calls[0].request.content) == {
+        "model": model,
+        "state": [
+            {"type": "text", "text": f"{_SCREEN_TEXT}\n\nOrder 1234."},
+            _PERPLEXITY_IMAGE_PART,
+            {"type": "image_url", "image_url": {"url": "data:image/webp;base64,BB=="}},
+        ],
+        "questions": {"is_defect": {"type": "noul", "instructions": "Is this a defect?"}},
+    }
+    assert isinstance(response, OpenAIDecisionResponse)
+
+
+@pytest.mark.parametrize(
+    ("state", "state_parts"),
+    (
+        (_SCREEN_TEXT, [{"type": "text", "text": _SCREEN_TEXT}]),
+        ({"ticket": 1234}, [{"ticket": 1234}]),
+        (["ticket 1234", {"note": "lid cracked"}], ["ticket 1234", {"note": "lid cracked"}]),
+    ),
+    ids=("string", "object", "array"),
+)
+def test_systemone_images_reach_perplexity_appended_to_the_callers_state(
+    state: object, state_parts: Sequence[object], respx_mock: respx.MockRouter
+) -> None:
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    response: Final = litellm.systemone(
+        model="perplexity/pplx-decider-v1.2",
+        api_key="caller-key",
+        state=state,
+        questions=_SYSTEMONE_PREDICATE,
+        images=[_PNG_DATA_URL, {"content_type": "image/webp", "base64": "BB=="}],
+    )
+
+    assert json.loads(route.calls[0].request.content) == {
+        "model": "pplx-decider-v1.2",
+        "state": [
+            *state_parts,
+            _PERPLEXITY_IMAGE_PART,
+            {"type": "image_url", "image_url": {"url": "data:image/webp;base64,BB=="}},
+        ],
+        "questions": {"is_defect": {"type": "noul", "instructions": "Is this a defect?"}},
+    }
+    assert isinstance(response, DecisionsResponse)
+
+
+def test_perplexity_text_only_requests_keep_the_callers_state_shape(respx_mock: respx.MockRouter) -> None:
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    litellm.systemone(
+        model="perplexity/pplx-decider-v1.2", api_key="caller-key", state=_SCREEN_TEXT, questions=_SYSTEMONE_PREDICATE
+    )
+
+    assert json.loads(route.calls[0].request.content)["state"] == _SCREEN_TEXT
+
+
+@pytest.mark.parametrize(("api", "request_kwargs"), _image_requests(_REMOTE_IMAGE_URL), ids=_PREDICATE_REQUEST_IDS)
+def test_remote_images_are_fetched_and_inlined_into_state_for_perplexity(
+    api: str, request_kwargs: Mapping[str, object], respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(litellm, "user_url_validation", False)
+    png: Final = b"\x89PNG\r\n\x1a\n"
+    image_route: Final = respx_mock.get(_REMOTE_IMAGE_URL).respond(content=png, headers={"content-type": "image/png"})
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    getattr(litellm, api)(model="perplexity/pplx-decider-v1.2", api_key="caller-key", **request_kwargs)
+
+    assert image_route.call_count == 1
+    assert json.loads(route.calls[0].request.content)["state"] == [
+        {"type": "text", "text": _SCREEN_TEXT},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(png).decode()}"}},
+    ]
+
+
+def test_perplexity_refuses_a_ninth_image_before_http(respx_mock: respx.MockRouter) -> None:
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    with pytest.raises(litellm.BadRequestError, match=r"perplexity takes at most 8 images per request, got 9"):
+        litellm.systemone(
+            model="perplexity/pplx-decider-v1.2",
+            api_key="caller-key",
+            state=_SCREEN_TEXT,
+            questions=_SYSTEMONE_PREDICATE,
+            images=[_PNG_DATA_URL] * 9,
+        )
+
+    assert not route.called
+
+
+def test_perplexity_refuses_image_types_it_cannot_read_before_http(
+    respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(litellm, "drop_params", False)
+    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+
+    with pytest.raises(litellm.BadRequestError, match=r"perplexity takes only .*image/png.* images, got image/gif"):
+        litellm.systemone(
+            model="perplexity/pplx-decider-v1.2",
+            api_key="caller-key",
+            state=_SCREEN_TEXT,
+            questions=_SYSTEMONE_PREDICATE,
+            images=["data:image/gif;base64,AA=="],
+        )
+
+    assert not route.called
+
+
+_PERPLEXITY_DECIDER_ROWS: Final[tuple[tuple[str, float], ...]] = (
+    ("perplexity/pplx-decider-v1.2", 2e-08),
+    ("perplexity/pplx-decider-latest", 2e-08),
+    ("perplexity/pplx-decider-flash-v1.2", 1e-08),
+    ("perplexity/pplx-decider-flash-latest", 1e-08),
+    ("perplexity/pplx-decider-v1.1-27b", 2e-08),
+    ("perplexity/pplx-decider-v1-27b", 2e-08),
+)
+
+
+@pytest.mark.usefixtures("local_model_cost_map")
+@pytest.mark.parametrize(
+    ("model", "input_cost_per_token"), _PERPLEXITY_DECIDER_ROWS, ids=[row[0] for row in _PERPLEXITY_DECIDER_ROWS]
+)
+def test_perplexity_decider_rows_price_and_advertise_images(model: str, input_cost_per_token: float) -> None:
+    row: Final = litellm.model_cost[model]
+
+    assert row["mode"] == "evaluation"
+    assert row["input_cost_per_token"] == input_cost_per_token
+    assert row["output_cost_per_token"] == 0.0
+    assert row["max_input_tokens"] == 262144
+    assert litellm.supports_vision(model)
+
+
 _IMAGE_REFUSALS: Final[tuple[tuple[str, Mapping[str, object], str], ...]] = (
     ("decisions", _image_requests(_PNG_DATA_URL)[0][1], "input_image"),
     ("systemone", _image_requests(_PNG_DATA_URL)[1][1], "images"),
@@ -2119,10 +2274,10 @@ def test_images_are_refused_before_http_when_the_provider_cannot_take_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(litellm, "drop_params", False)
-    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+    route: Final = respx_mock.post(_NACE_SYSTEMONE_URL).respond(json=_RESPONSE)
 
     with pytest.raises(litellm.UnsupportedParamsError, match=rf"\['{param}'\].*drop_params") as caught:
-        getattr(litellm, api)(model="perplexity/pplx-decider-v1-27b", api_key="caller-key", **request_kwargs)
+        getattr(litellm, api)(model="nace/drex-v2.0", api_key="caller-key", **request_kwargs)
 
     assert caught.value.status_code == 400
     assert not route.called
@@ -2134,14 +2289,12 @@ async def test_images_are_dropped_from_the_wire_under_drop_params(
     api: str, request_kwargs: Mapping[str, object], respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(litellm, "drop_params", False)
-    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+    route: Final = respx_mock.post(_NACE_SYSTEMONE_URL).respond(json=_RESPONSE)
 
-    await getattr(litellm, f"a{api}")(
-        model="perplexity/pplx-decider-v1-27b", api_key="caller-key", drop_params=True, **request_kwargs
-    )
+    await getattr(litellm, f"a{api}")(model="nace/drex-v2.0", api_key="caller-key", drop_params=True, **request_kwargs)
 
     assert json.loads(route.calls[0].request.content) == {
-        "model": "pplx-decider-v1-27b",
+        "model": "drex-v2.0",
         "state": _SCREEN_TEXT,
         "questions": {"is_defect": {"type": "noul", "instructions": "Is this a defect?"}},
     }
@@ -2334,11 +2487,11 @@ async def test_dropping_the_only_input_images_is_rejected_before_http(
     respx_mock: respx.MockRouter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(litellm, "drop_params", False)
-    route: Final = respx_mock.post(_PERPLEXITY_DECISIONS_URL).respond(json=_RESPONSE)
+    route: Final = respx_mock.post(_NACE_SYSTEMONE_URL).respond(json=_RESPONSE)
 
     with pytest.raises(litellm.BadRequestError, match=r"\['input_image'\].*leaves no input") as caught:
         await litellm.adecisions(
-            model="perplexity/pplx-decider-v1-27b",
+            model="nace/drex-v2.0",
             api_key="caller-key",
             input=[{"role": "user", "content": [{"type": "input_image", "image_url": _PNG_DATA_URL}]}],
             questions=_PREDICATE_QUESTIONS,
