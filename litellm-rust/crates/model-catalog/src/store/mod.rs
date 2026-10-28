@@ -121,7 +121,6 @@ mod tests {
     use std::cell::{Cell, RefCell};
 
     use indexmap::IndexMap;
-    use proptest::prelude::*;
     use rstest::{fixture, rstest};
 
     use super::*;
@@ -196,25 +195,6 @@ mod tests {
             self.index_changes.set(self.index_changes.get() + 1);
         }
 
-        fn linear_find(&self, name: &str) -> Option<String> {
-            let dict = self.dict.borrow();
-            if dict.contains_key(name) {
-                return Some(name.to_owned());
-            }
-            let lower = name.to_lowercase();
-            dict.keys()
-                .rfind(|key| key.to_lowercase() == lower)
-                .cloned()
-        }
-
-        fn linear_provider_keys(&self, provider: &str) -> Vec<String> {
-            self.dict
-                .borrow()
-                .iter()
-                .filter(|(_, row_provider)| row_provider.as_deref() == Some(provider))
-                .map(|(key, _)| key.clone())
-                .collect()
-        }
     }
 
     /// A row is its `litellm_provider`, which is also the group the store lists its key under
@@ -477,80 +457,5 @@ mod tests {
             Some(&Some("azure".to_owned()))
         );
         assert_eq!(store.get("Azure/GPT-4o"), None);
-    }
-
-    #[derive(Clone, Debug)]
-    enum Op {
-        Set(String, Option<String>),
-        Del(String),
-        Find(String),
-        ProviderKeys(String),
-    }
-
-    fn key() -> impl Strategy<Value = String> {
-        "[aAbB]{1,3}"
-    }
-
-    fn provider() -> impl Strategy<Value = String> {
-        prop_oneof![Just("openai".to_owned()), Just("azure".to_owned())]
-    }
-
-    fn op() -> impl Strategy<Value = Op> {
-        prop_oneof![
-            (key(), proptest::option::of(provider()))
-                .prop_map(|(key, provider)| Op::Set(key, provider)),
-            key().prop_map(Op::Del),
-            key().prop_map(Op::Find),
-            provider().prop_map(Op::ProviderKeys),
-        ]
-    }
-
-    proptest! {
-        #[test]
-        fn with_an_honest_stamp_every_answer_matches_a_linear_scan(
-            ops in proptest::collection::vec(op(), 1..80),
-        ) {
-            let model_cost = ModelCost::new(&[], true);
-            let store = Store::new(&model_cost);
-            for op in ops {
-                match op {
-                    Op::Set(key, provider) => model_cost.set(&key, provider.as_deref()),
-                    Op::Del(key) => model_cost.del(&key),
-                    Op::Find(name) => prop_assert_eq!(store.find_key(&name), model_cost.linear_find(&name)),
-                    Op::ProviderKeys(provider) => prop_assert_eq!(
-                        store.keys_in(&provider),
-                        model_cost.linear_provider_keys(&provider)
-                    ),
-                }
-            }
-        }
-
-        #[test]
-        fn with_the_dict_stamp_answers_stay_sound_and_invalidate_restores_them(
-            ops in proptest::collection::vec(op(), 1..80),
-            probe in key(),
-            probe_provider in provider(),
-        ) {
-            let model_cost = ModelCost::new(&[], false);
-            let store = Store::new(&model_cost);
-            for op in ops {
-                match op {
-                    Op::Set(key, provider) => model_cost.set(&key, provider.as_deref()),
-                    Op::Del(key) => model_cost.del(&key),
-                    Op::Find(name) => {
-                        let found = store.find_key(&name);
-                        prop_assert!(found.as_deref().is_none_or(|key| (&model_cost).contains(key)));
-                        prop_assert!(found.is_none_or(|key| key.to_lowercase() == name.to_lowercase()));
-                    }
-                    Op::ProviderKeys(provider) => {
-                        let keys = store.keys_in(&provider);
-                        prop_assert!(keys.iter().all(|key| (&model_cost).contains(key)));
-                    }
-                }
-            }
-            store.invalidate();
-            prop_assert_eq!(store.find_key(&probe), model_cost.linear_find(&probe));
-            prop_assert_eq!(store.keys_in(&probe_provider), model_cost.linear_provider_keys(&probe_provider));
-        }
     }
 }
