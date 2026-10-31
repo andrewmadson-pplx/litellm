@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from itertools import chain
 from types import MappingProxyType
-from typing import Final
+from typing import Final, overload
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -230,7 +230,7 @@ def _message_texts(message: OpenAIDecisionInputMessage) -> tuple[str, ...]:
     return tuple(part.text for part in message.content if isinstance(part, OpenAIDecisionInputText))
 
 
-def systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
+def _systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> DecisionsJSON:
     match decision_input:
         case DecisionsIRState():
             return decision_input.state
@@ -242,6 +242,14 @@ def systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> D
 
 def _media_type(content_type: str) -> str:
     return content_type.split(";", 1)[0].strip().lower()
+
+
+@overload
+def image_media_type(image: DecisionsBase64Image) -> str: ...
+
+
+@overload
+def image_media_type(image: str) -> str | None: ...
 
 
 def image_media_type(image: DecisionsImage) -> str | None:
@@ -299,7 +307,7 @@ def _systemone_question(question: DecisionsIRQuestion) -> Mapping[str, object]:
 
 
 def ir_to_systemone_request(model: str, request: DecisionsIRRequest) -> Mapping[str, object]:
-    state: Final = systemone_state(request.input)
+    state: Final = _systemone_state(request.input)
     keyed_questions: Final = zip(systemone_keys(request.questions), request.questions, strict=True)
     images: Final = input_images(request.input)
     return {
