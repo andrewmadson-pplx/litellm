@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from itertools import chain
 from types import MappingProxyType
-from typing import Final
+from typing import Final, overload
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
@@ -241,6 +241,14 @@ def _systemone_state(decision_input: DecisionsIRState | DecisionsIRMessages) -> 
 
 def _media_type(content_type: str) -> str:
     return content_type.split(";", 1)[0].strip().lower()
+
+
+@overload
+def image_media_type(image: DecisionsBase64Image) -> str: ...
+
+
+@overload
+def image_media_type(image: str) -> str | None: ...
 
 
 def image_media_type(image: DecisionsImage) -> str | None:

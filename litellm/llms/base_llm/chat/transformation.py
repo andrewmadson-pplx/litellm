@@ -5,7 +5,7 @@ Common base config for all LLM providers
 import types
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Final, Union
+from typing import TYPE_CHECKING, Any, Final, Union, overload
 
 import httpx
 from pydantic import BaseModel, TypeAdapter
@@ -69,6 +69,20 @@ class BaseLLMException(Exception):
 
 
 _NO_ATTRIBUTION_HEADERS: Final[Mapping[str, str]] = types.MappingProxyType({})
+
+
+@overload
+def with_attribution_headers(
+    attribution_headers: Mapping[str, str],
+    headers: dict[str, str],  # mutable-ok: caller-owned headers; implementation does not mutate them
+) -> dict[str, str]: ...  # mutable-ok: request headers
+
+
+@overload
+def with_attribution_headers(
+    attribution_headers: Mapping[str, str],
+    headers: None,
+) -> dict[str, str] | None: ...  # mutable-ok: request headers
 
 
 def with_attribution_headers(
