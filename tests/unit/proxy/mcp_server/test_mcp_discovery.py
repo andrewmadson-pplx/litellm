@@ -108,6 +108,15 @@ class TestMCPRegistryFile:
         assert entry["category"] == "Productivity"
         assert "ms-365-mcp-server" in entry["registry_url"]
 
+    def test_perplexity_runs_the_official_server_with_its_api_key(self, registry_path):
+        with open(registry_path, "r") as f:
+            data = json.load(f)
+        entry: Final = next(s for s in data["servers"] if s["name"] == "perplexity")
+        assert entry["transport"] == "stdio"
+        assert entry["args"] == ["-y", "@perplexity-ai/mcp-server"]
+        assert entry["category"] == "Search"
+        assert [v["name"] for v in entry["env_vars"]] == ["PERPLEXITY_API_KEY"]
+
     def test_bundled_icons_exist(self, registry_path):
         """An icon served from the proxy's own assets ships twice, as the built copy the wheel packages and as
         the dashboard source copy every Docker image rebuilds from. Both must exist and match or a card goes blank."""
